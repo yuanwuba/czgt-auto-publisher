@@ -9,6 +9,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import ctypes
+
 import pyautogui
 import pygetwindow as gw
 
@@ -75,13 +77,44 @@ class Automator:
                 raise RuntimeError(
                     "创作罐头窗口未能打开。请手动启动一次程序；如果仍无法启动，建议注销/重启 Windows 后重试"
                 )
+        self.focus_window()
+        return self.window
+
+    def focus_window(self):
+        """把创作罐头切到前台并最大化。pygetwindow.activate() 在 Edge 抢焦点时会失败，
+        这里用 Alt 键技巧绕过 Windows 前台锁定，再调用 SetForegroundWindow。"""
+        self.window = self.window or self.find_window()
+        if self.window is None:
+            return False
+        try:
+            # 最小化抢焦点的浏览器窗口（如 Edge），避免它反复抢前台
+            for w in gw.getAllWindows():
+                if w.title and w.title != self.window.title and (
+                    "Edge" in w.title or "Microsoft" in w.title
+                ) and not w.isMinimized:
+                    try:
+                        w.minimize()
+                    except Exception:
+                        pass
+            h = self.window._hWnd
+            u = ctypes.windll.user32
+            u.ShowWindow(h, 3)  # SW_MAXIMIZE
+            pyautogui.keyDown("alt")
+            pyautogui.keyUp("alt")
+            u.BringWindowToTop(h)
+            u.SetForegroundWindow(h)
+            time.sleep(0.8)
+            active = gw.getActiveWindow()
+            if active and self.cfg.get("window_title_contains", "创作罐头") in active.title:
+                self.log(f"已激活窗口: {active.title}")
+                return True
+        except Exception as e:
+            self.log(f"激活窗口异常: {e}", logging.WARNING)
         try:
             self.window.activate()
         except Exception:
             pass
-        time.sleep(1)
-        self.log(f"已激活窗口: {self.window.title}")
-        return self.window
+        return False
 
     def template_path(self, name: str) -> Path | None:
         rel = self.cfg["steps"].get(name, {}).get("image", "")
@@ -177,41 +210,73 @@ class Automator:
         self.log("筛选条件已尝试设置")
 
     def create_short_graphic(self):
-        self.click_step("first_title", required=False)
-        time.sleep(0.6)
+        # 第一行 AI创作 -> 发短图文 -> 等选题生成
         self.click_step("ai_create")
-        time.sleep(0.8)
+        time.sleep(1.2)
         self.click_step("send_short_graphic")
-        time.sleep(4)
+        self.log("已进入发短图文，等待 5 篇选题生成…")
+        time.sleep(int(self.cfg.get("outline_wait_seconds", 16)))
 
     def wait_images_and_upload(self):
-        time.sleep(int(self.cfg.get("cycle_delay_seconds", 3)))
+        # 选第一篇选题 -> 点发送箭头 -> 等完整文章生成
         self.click_step("pick_image", required=False)
+        time.sleep(1)
         self.click_step("next_arrow", required=False)
         upload_file = self.cfg.get("upload_file", "")
-        if self.click_step("upload_file", required=False) and upload_file:
+        if upload_file and self.click_step("upload_file", required=False):
             time.sleep(0.8)
             pyautogui.write(upload_file, interval=0.005)
             pyautogui.press("enter")
             time.sleep(1)
-        wait = int(self.cfg.get("generation_wait_seconds", 75))
-        self.log(f"等待 AI 生成完成（{wait}秒）…")
+        wait = int(self.cfg.get("generation_wait_seconds", 100))
+        self.log(f"等待 AI 生成完整文章（{wait}秒）…")
         time.sleep(wait)
-        self.log("图文生成/上传步骤已尝试")
+
+    def _zoom_out(self, steps: int = 4):
+        pyautogui.keyDown("ctrl")
+        pyautogui.moveTo(960, 500)
+        pyautogui.scroll(-steps)
+        pyautogui.keyUp("ctrl")
+        time.sleep(0.8)
+
+    def _zoom_in(self, steps: int = 4):
+        pyautogui.keyDown("ctrl")
+        pyautogui.moveTo(960, 500)
+        pyautogui.scroll(steps)
+        pyautogui.keyUp("ctrl")
+        time.sleep(0.8)
 
     def insert_editor(self):
-        if not self.click_step("insert_editor", required=False):
-            self.log("未找到“插入编辑器”按钮，请运行 calibrate.py 补充坐标", logging.WARNING)
-            return False
+        """生成完成后，文章卡片在面板底部、被输入区遮挡。先缩小界面 Ctrl+滚轮，
+        滚动到对话底部露出“插入编辑器”，点击后再恢复缩放。"""
+        self._zoom_out(4)
+        pyautogui.moveTo(1600, 700)
+        pyautogui.scroll(-30)  # 滚到对话底部
+        time.sleep(1.2)
+        box = self.locate_template("insert_editor")
+        if box:
+            pyautogui.click(pyautogui.center(box))
+            self.log("点击模板 插入编辑器")
+        else:
+            s = self.cfg["steps"].get("insert_editor", {})
+            if not (s.get("x", 0) > 0 and s.get("y", 0) > 0):
+                self._zoom_in(4)
+                self.log("未找到“插入编辑器”按钮", logging.WARNING)
+                return False
+            pyautogui.click(int(s["x"]), int(s["y"]))
+            self.log(f"点击坐标 插入编辑器 ({s['x']},{s['y']})")
         time.sleep(2)
+        self._zoom_in(4)  # 恢复缩放，后续编辑器坐标基于标准缩放
         self.log("已进入编辑器界面")
         return True
 
     def publish_or_fallback(self):
+        """实测流程：编辑器底部“选择账号发布” -> 随机选账号 -> 创作罐头复制全文并
+        打开微头条发布页 -> 页面正文常为空，需点输入框清空后 Ctrl+V 粘贴 -> 点“发布”。"""
         if not self.click_step("select_account", required=False):
             self.log("未找到“选择账号发布”按钮，请运行 calibrate.py", logging.WARNING)
             return False
-        time.sleep(1)
+        time.sleep(1.2)
         positions = self.cfg.get("account_positions", [])
         if positions:
             x, y = random.choice(positions)
@@ -221,35 +286,30 @@ class Automator:
             if not self.click_step("account_item", required=False):
                 self.log("未配置账号位置", logging.WARNING)
                 return False
-        time.sleep(6)
+        time.sleep(6)  # 等待跳转到微头条发布页
 
-        # 实际行为：选账号后自动复制内容并打开微头条发布页，页面已预填文本
-        if self.wait_step("publish", 25):
-            self.click_step("publish")
-            time.sleep(3)
-            self.log("已点击微头条发布按钮")
-            return True
-
-        # 兜底：若未直接打开发布页，走作品管理 → 微头条 → 粘贴 → 发布
-        self.log("未直接找到发布页，尝试作品管理 → 微头条兜底")
-        self.click_step("works_manage", required=False)
-        time.sleep(2)
-        if not self.click_step("weitoutiao_tab", required=False):
-            self.log("未找到微头条标签", logging.WARNING)
-            return False
-        time.sleep(2)
+        # 关键：选账号后正文通常为空，必须把剪贴板里的全文粘贴进输入框
         if not self.click_step("weitoutiao_textarea", required=False):
-            self.log("未找到微头条输入框", logging.WARNING)
-            return False
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.5)
-        if self.wait_step("publish", 15):
-            self.click_step("publish")
+            self.log("未找到微头条输入框，尝试兜底入口", logging.WARNING)
+            self.click_step("works_manage", required=False)
             time.sleep(2)
-            self.log("已在微头条点击发布按钮")
-            return True
-        self.log("未找到发布按钮，跳过自动发布", logging.WARNING)
-        return False
+            if not self.click_step("weitoutiao_tab", required=False):
+                self.log("未找到微头条标签", logging.WARNING)
+                return False
+            time.sleep(2)
+            self.click_step("weitoutiao_textarea")
+        time.sleep(0.5)
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+        time.sleep(0.3)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(1)
+        self.log("已将全文粘贴到微头条输入框")
+
+        self.click_step("publish")
+        time.sleep(3)
+        self.log("已点击微头条“发布”按钮，请到作品管理核实结果")
+        return True
 
     def run_once(self) -> bool:
         try:
