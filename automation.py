@@ -56,16 +56,25 @@ class Automator:
             app = self.cfg["app_path"]
             if not os.path.exists(app):
                 raise RuntimeError(f"找不到程序: {app}")
-            self.log(f"启动 {app}")
-            subprocess.Popen([app], cwd=os.path.dirname(app))
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                time.sleep(1)
-                self.window = self.find_window()
+            exe_direct = os.path.join(os.path.dirname(app), "1.8.3", "创作罐头.exe")
+            candidates = [app]
+            if os.path.exists(exe_direct):
+                candidates.append(exe_direct)
+            for candidate in candidates:
+                self.log(f"启动 {candidate}")
+                subprocess.Popen([candidate], cwd=os.path.dirname(candidate))
+                deadline = time.time() + 30
+                while time.time() < deadline:
+                    time.sleep(1)
+                    self.window = self.find_window()
+                    if self.window:
+                        break
                 if self.window:
                     break
             if self.window is None:
-                raise RuntimeError("创作罐头窗口未能打开，请检查程序是否可正常启动")
+                raise RuntimeError(
+                    "创作罐头窗口未能打开。请手动启动一次程序；如果仍无法启动，建议注销/重启 Windows 后重试"
+                )
         try:
             self.window.activate()
         except Exception:
