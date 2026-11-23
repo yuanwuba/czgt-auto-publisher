@@ -11,7 +11,7 @@
   "skip_filters": true,
   "upload_file": "",
   "account_mode": "random",
-  "account_count": 3,
+  "account_positions": [[1184, 446], [1182, 501]],
   "steps": {
     "hot_material": {"x": 130, "y": 323, "image": ""},
     "all_viral": {"x": 503, "y": 139, "image": ""},
@@ -26,13 +26,13 @@
     "send_short_graphic": {"x": 1700, "y": 839, "image": ""},
     "pick_image": {"x": 1500, "y": 180, "image": ""},
     "next_arrow": {"x": 1760, "y": 923, "image": ""},
-    "upload_file": {"x": 0, "y": 0, "image": ""},
-    "insert_editor": {"x": 0, "y": 0, "image": ""},
-    "select_account": {"x": 0, "y": 0, "image": ""},
-    "account_item": {"x": 0, "y": 0, "image": ""},
-    "publish": {"x": 1465, "y": 985, "image": "templates/publish_button.png"},
+    "upload_file": {"x": 688, "y": 533, "image": ""},
+    "insert_editor": {"x": 1760, "y": 754, "image": ""},
+    "select_account": {"x": 1186, "y": 919, "image": ""},
+    "account_item": {"x": 1184, "y": 446, "image": ""},
+    "publish": {"x": 1571, "y": 921, "image": "templates/weitoutiao_publish_button.png"},
     "works_manage": {"x": 0, "y": 0, "image": ""},
     "weitoutiao_tab": {"x": 740, "y": 265, "image": "templates/weitoutiao_tab.png"},
-    "weitoutiao_textarea": {"x": 700, "y": 200, "image": ""}
+    "weitoutiao_textarea": {"x": 900, "y": 400, "image": ""}
   }
 }

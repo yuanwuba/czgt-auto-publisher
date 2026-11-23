@@ -117,12 +117,14 @@ class Automator:
 
     def wait_step(self, name: str, timeout: int = 30):
         deadline = time.time() + timeout
+        has_template = self.template_path(name) is not None
         while time.time() < deadline:
             if self.locate_template(name) is not None:
                 return True
-            s = self.cfg["steps"].get(name, {})
-            if s.get("x", 0) > 0 and s.get("y", 0) > 0:
-                return True
+            if not has_template:
+                s = self.cfg["steps"].get(name, {})
+                if s.get("x", 0) > 0 and s.get("y", 0) > 0:
+                    return True
             time.sleep(0.5)
         return False
 
@@ -210,37 +212,44 @@ class Automator:
             self.log("未找到“选择账号发布”按钮，请运行 calibrate.py", logging.WARNING)
             return False
         time.sleep(1)
-        count = int(self.cfg.get("account_count", 3))
-        for _ in range(random.randint(0, max(0, count - 1))):
-            pyautogui.press("down")
-        pyautogui.press("enter")
-        time.sleep(0.8)
-        if not self.click_step("publish", required=False):
-            self.log("未找到“发布”按钮，跳过自动发布", logging.WARNING)
-            return False
-        time.sleep(3)
+        positions = self.cfg.get("account_positions", [])
+        if positions:
+            x, y = random.choice(positions)
+            pyautogui.click(int(x), int(y))
+            self.log(f"已随机选择账号 ({x},{y})")
+        else:
+            if not self.click_step("account_item", required=False):
+                self.log("未配置账号位置", logging.WARNING)
+                return False
+        time.sleep(6)
 
-        # detect "copy success" / works management fallback
-        fallback = False
-        p = BASE / "templates" / "copy_success.png"
-        if p.exists():
-            try:
-                fallback = pyautogui.locateOnScreen(str(p), grayscale=True) is not None
-            except Exception:
-                fallback = False
-        if self.locate_template("works_manage"):
-            fallback = True
-        if fallback:
-            self.log("检测到复制成功/作品管理，进入微头条兜底流程")
-            self.click_step("works_manage", required=False)
-            self.click_step("weitoutiao_tab")
-            time.sleep(1.5)
-            self.click_step("weitoutiao_textarea")
-            pyautogui.hotkey("ctrl", "v")
-            time.sleep(0.5)
+        # 实际行为：选账号后自动复制内容并打开微头条发布页，页面已预填文本
+        if self.wait_step("publish", 25):
+            self.click_step("publish")
+            time.sleep(3)
+            self.log("已点击微头条发布按钮")
+            return True
+
+        # 兜底：若未直接打开发布页，走作品管理 → 微头条 → 粘贴 → 发布
+        self.log("未直接找到发布页，尝试作品管理 → 微头条兜底")
+        self.click_step("works_manage", required=False)
+        time.sleep(2)
+        if not self.click_step("weitoutiao_tab", required=False):
+            self.log("未找到微头条标签", logging.WARNING)
+            return False
+        time.sleep(2)
+        if not self.click_step("weitoutiao_textarea", required=False):
+            self.log("未找到微头条输入框", logging.WARNING)
+            return False
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.5)
+        if self.wait_step("publish", 15):
             self.click_step("publish")
             time.sleep(2)
-        self.log("发布流程已执行，请人工核实结果")
+            self.log("已在微头条点击发布按钮")
+            return True
+        self.log("未找到发布按钮，跳过自动发布", logging.WARNING)
+        return False
 
     def run_once(self) -> bool:
         try:
@@ -250,9 +259,9 @@ class Automator:
             self.set_filters()
             self.create_short_graphic()
             self.wait_images_and_upload()
-            self.insert_editor()
-            self.publish_or_fallback()
-            return True
+            if not self.insert_editor():
+                return False
+            return self.publish_or_fallback()
         except LoginRequired as e:
             self.log(str(e), logging.ERROR)
             raise
