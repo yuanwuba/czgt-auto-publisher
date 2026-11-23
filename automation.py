@@ -144,11 +144,17 @@ class Automator:
         self.click_step("hot_material")
         time.sleep(1)
         if not self.click_step("all_viral", required=False):
-            self.log("全网爆文入口未配置，尝试使用页面内文字查找失败；请运行 calibrate.py", logging.WARNING)
+            self.log("全网爆文入口未配置，请运行 calibrate.py", logging.WARNING)
             raise ConfigMissing("all_viral")
-        time.sleep(1.5)
+        time.sleep(2)
+        data_wait = int(self.cfg.get("data_wait_seconds", 12))
+        self.wait_step("ai_create", data_wait)
+        time.sleep(1)
 
     def set_filters(self):
+        if self.cfg.get("skip_filters", False):
+            self.log("筛选条件已是默认值（今日头条/短图文/全部/全部/1天内/阅读量排序），跳过")
+            return
         options = self.cfg.get("filter_options", {
             "platform_dropdown": 1,
             "content_type_dropdown": 2,
@@ -174,7 +180,7 @@ class Automator:
         self.click_step("ai_create")
         time.sleep(0.8)
         self.click_step("send_short_graphic")
-        time.sleep(2)
+        time.sleep(4)
 
     def wait_images_and_upload(self):
         time.sleep(int(self.cfg.get("cycle_delay_seconds", 3)))
@@ -186,23 +192,32 @@ class Automator:
             pyautogui.write(upload_file, interval=0.005)
             pyautogui.press("enter")
             time.sleep(1)
+        wait = int(self.cfg.get("generation_wait_seconds", 75))
+        self.log(f"等待 AI 生成完成（{wait}秒）…")
+        time.sleep(wait)
         self.log("图文生成/上传步骤已尝试")
 
     def insert_editor(self):
-        self.click_step("insert_editor")
+        if not self.click_step("insert_editor", required=False):
+            self.log("未找到“插入编辑器”按钮，请运行 calibrate.py 补充坐标", logging.WARNING)
+            return False
         time.sleep(2)
         self.log("已进入编辑器界面")
+        return True
 
     def publish_or_fallback(self):
-        self.click_step("select_account")
+        if not self.click_step("select_account", required=False):
+            self.log("未找到“选择账号发布”按钮，请运行 calibrate.py", logging.WARNING)
+            return False
         time.sleep(1)
         count = int(self.cfg.get("account_count", 3))
-        # random account from popup using arrow keys
         for _ in range(random.randint(0, max(0, count - 1))):
             pyautogui.press("down")
         pyautogui.press("enter")
         time.sleep(0.8)
-        self.click_step("publish")
+        if not self.click_step("publish", required=False):
+            self.log("未找到“发布”按钮，跳过自动发布", logging.WARNING)
+            return False
         time.sleep(3)
 
         # detect "copy success" / works management fallback
